@@ -580,45 +580,55 @@ async function getReferencedEpics({ octokit }) {
   const epicLabelName = _actions_core__WEBPACK_IMPORTED_MODULE_0__.getInput('epic-label-name', { required: true });
 
   if (_actions_github__WEBPACK_IMPORTED_MODULE_1__.context.payload.action !== 'deleted') {
-    return [];
+    const events = await octokit.issues.listEventsForTimeline({
+      owner: _actions_github__WEBPACK_IMPORTED_MODULE_1__.context.repo.owner,
+      repo: _actions_github__WEBPACK_IMPORTED_MODULE_1__.context.repo.repo,
+      issue_number: _actions_github__WEBPACK_IMPORTED_MODULE_1__.context.payload.issue.number,
+    });
+
+    return events.data
+      .filter((item) => item.event === 'cross-referenced' && item.source)
+      .filter(
+        (item) => item.source.issue.labels.filter(
+          (label) => label.name.toLowerCase() === epicLabelName.toLowerCase(),
+        ).length > 0,
+      );
   }
 
-  const events = await octokit.issues.listEventsForTimeline({
-    owner: _actions_github__WEBPACK_IMPORTED_MODULE_1__.context.repo.owner,
-    repo: _actions_github__WEBPACK_IMPORTED_MODULE_1__.context.repo.repo,
-    issue_number: _actions_github__WEBPACK_IMPORTED_MODULE_1__.context.payload.issue.number,
-  });
-
-  return events.data
-    .filter((item) => item.event === 'cross-referenced' && item.source)
-    .filter(
-      (item) => item.source.issue.labels.filter(
-        (label) => label.name.toLowerCase() === epicLabelName.toLowerCase(),
-      ).length > 0,
-    );
+  return [];
 }
 
 async function updateEpic({ octokit, epic }) {
+  const issueNumber = _actions_github__WEBPACK_IMPORTED_MODULE_1__.context.payload.issue.number;
+  const epicNumber = epic.source.issue.number;
   const epicBody = epic.source.issue.body;
 
+  const pattern = new RegExp(`- \\[[ x]\\] .*#${issueNumber}.*`, 'gm');
+  const matches = Array.from(epicBody.matchAll(pattern));
+
   const patternAll = new RegExp('- \\[[ x]\\] .*#.*', 'gm');
-  const matchesAll = Array.from(epicBody.matchAll(patternAll));
-  const matchesAllCount = matchesAll.length;
   const patternAllDone = new RegExp('- \\[[x]\\] .*#.*', 'gm');
+  const matchesAll = Array.from(epicBody.matchAll(patternAll));
   const matchesAllDone = Array.from(epicBody.matchAll(patternAllDone));
-  const matchesAllDoneCount = matchesAllDone.length;
+
+  const epicState = (() => {
+    if (
+      matches.length
+      && matchesAll.length
+      && matchesAllDone.length
+      && matchesAllDone.length === matchesAll.length
+    ) {
+      return 'closed';
+    }
+    return 'open';
+  })();
 
   const result = await octokit.issues.update({
     owner: _actions_github__WEBPACK_IMPORTED_MODULE_1__.context.repo.owner,
     repo: _actions_github__WEBPACK_IMPORTED_MODULE_1__.context.repo.repo,
-    issue_number: epic.source.issue.number,
-    body: epic.source.issue.body,
-    state: (() => {
-      if (matchesAllCount === matchesAllDoneCount) {
-        return 'closed';
-      }
-      return 'open';
-    })(),
+    issue_number: epicNumber,
+    body: epicBody,
+    state: epicState,
   });
 
   return result;
